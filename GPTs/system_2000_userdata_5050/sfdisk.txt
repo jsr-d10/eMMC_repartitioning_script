@@ -1,0 +1,32 @@
+label: gpt
+label-id: 00000000-0000-0000-0000-000000000000
+device: eMMC_rev.C_a29cde.img
+unit: sectors
+first-lba: 34
+last-lba: 15269854
+
+eMMC_rev.C_a29cde.img1 : start=      131072, size=        3072, type=638FF8E2-22C9-E33B-8F5D-0E81686A68CB, uuid=00000000-0000-0000-0000-000000000000, name="fsg", attrs="GUID:60"
+eMMC_rev.C_a29cde.img2 : start=      262144, size=        1024, type=DEA0BA2C-CBDD-4805-B4F9-F428251C3E98, uuid=00000000-0000-0000-0000-000000000000, name="sbl1"
+eMMC_rev.C_a29cde.img3 : start=      263168, size=        1024, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="sbl1bak"
+eMMC_rev.C_a29cde.img4 : start=      264192, size=          64, type=D4E0D938-B7FA-48C1-9D21-BC5ED5C4B203, uuid=00000000-0000-0000-0000-000000000000, name="sdi"
+eMMC_rev.C_a29cde.img5 : start=      264256, size=        2048, type=400FFDCD-22E0-47E7-9A23-F16ED9382388, uuid=00000000-0000-0000-0000-000000000000, name="aboot"
+eMMC_rev.C_a29cde.img6 : start=      266304, size=        2048, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="abootbak"
+eMMC_rev.C_a29cde.img7 : start=      268352, size=        1000, type=098DF793-D712-413D-9D4E-89D711772228, uuid=00000000-0000-0000-0000-000000000000, name="rpm"
+eMMC_rev.C_a29cde.img8 : start=      269352, size=        1000, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="rpmbak"
+eMMC_rev.C_a29cde.img9 : start=      270352, size=        1000, type=A053AA7F-40B8-4B1C-BA08-2F68AC71A4F4, uuid=00000000-0000-0000-0000-000000000000, name="tz"
+eMMC_rev.C_a29cde.img10 : start=      271352, size=        1000, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="tzbak"
+eMMC_rev.C_a29cde.img11 : start=      272352, size=        2048, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="pad"
+eMMC_rev.C_a29cde.img12 : start=      274400, size=        3072, type=EBBEADAF-22C9-E33B-8F5D-0E81686A68CB, uuid=00000000-0000-0000-0000-000000000000, name="modemst1"
+eMMC_rev.C_a29cde.img13 : start=      277472, size=        3072, type=0A288B1F-22C9-E33B-8F5D-0E81686A68CB, uuid=00000000-0000-0000-0000-000000000000, name="modemst2"
+eMMC_rev.C_a29cde.img14 : start=      280544, size=        2048, type=20117F86-E985-4357-B9EE-374BC1D8487D, uuid=00000000-0000-0000-0000-000000000000, name="misc"
+eMMC_rev.C_a29cde.img15 : start=      282592, size=           2, type=57B90A16-22C9-E33B-8F5D-0E81686A68CB, uuid=00000000-0000-0000-0000-000000000000, name="fsc"
+eMMC_rev.C_a29cde.img16 : start=      282624, size=          16, type=2C86E742-745E-4FDD-BFD8-B6A7AC638772, uuid=00000000-0000-0000-0000-000000000000, name="ssd"
+eMMC_rev.C_a29cde.img17 : start=      284672, size=       20480, type=20117F86-E985-4357-B9EE-374BC1D8487D, uuid=00000000-0000-0000-0000-000000000000, name="splash"
+eMMC_rev.C_a29cde.img18 : start=      305152, size=      131072, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="modem", attrs="GUID:60"
+eMMC_rev.C_a29cde.img19 : start=      436224, size=          64, type=20A0C19C-286A-42FA-9CE7-F64C3226A794, uuid=00000000-0000-0000-0000-000000000000, name="DDR", attrs="GUID:60"
+eMMC_rev.C_a29cde.img20 : start=      438272, size=       32768, type=20117F86-E985-4357-B9EE-374BC1D8487D, uuid=00000000-0000-0000-0000-000000000000, name="boot", attrs="GUID:60"
+eMMC_rev.C_a29cde.img21 : start=      471040, size=       65536, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="persist", attrs="GUID:60"
+eMMC_rev.C_a29cde.img22 : start=      536576, size=      262144, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="cache", attrs="GUID:60"
+eMMC_rev.C_a29cde.img23 : start=      798720, size=       32768, type=20117F86-E985-4357-B9EE-374BC1D8487D, uuid=00000000-0000-0000-0000-000000000000, name="recovery", attrs="GUID:60"
+eMMC_rev.C_a29cde.img24 : start=      831488, size=     4096000, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="system", attrs="GUID:60"
+eMMC_rev.C_a29cde.img25 : start=     4927488, size=    10342367, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7, uuid=00000000-0000-0000-0000-000000000000, name="userdata"

@@ -1,0 +1,424 @@
+#!/sbin/sh
+# eMMC repartitioning script for JSR D10F (HighScreen Boost IIse)
+# By S-trace <S-trace@list.ru>
+# v0.00 07.jan.2017
+
+GPT_CONST_PART_MD5="11ea6e22e867dd1c179178fa4bc13394"
+RECOVERY_BUILD_DATE_2870M_TEST1="1453027702"
+RECOVERY_BUILD_DATE_3020="1461523680"
+EMMC_SIZE="7818182656"
+EMMC_BLOCK_DEVICE="/dev/block/platform/msm_sdcc.1/mmcblk0"
+EMMC_PARTITIONS_PATH="/dev/block/platform/msm_sdcc.1/by-name"
+RECOVERY_FD="$2"
+ZIP="$3"
+
+# Any pre-check was failed
+E_BADRECOVERY=3
+E_EMMCSIZEMISMATCH=4
+E_NOIBL=5
+E_NOSTORAGE=6
+E_BADSTORAGEFS=7
+E_LOWFREESTORAGE=8
+E_LOWBATTERY=9
+
+# An error during preparing procedures
+E_GPTBACKUPFAIL=10
+E_GPTWASBROKEN=11
+E_CONSTGPTMISMATCH=12
+E_UMOUNTFAIL=13
+E_PARTITIONREADFAIL=14
+E_EMMCBACKUPFAILED=15
+E_GPTEXTRACTFAIL=16
+E_GPTCHECKFAIL=17
+E_EMMCSTILLBUSY=18
+
+# An error after repartitioning, changes was reverted
+E_REVERTED=20
+
+# An error after repartitioning, changes was NOT reverted
+E_FATAL=30
+
+set -o pipefail # S-trace: WARNING: This is bashism, and I'm know this. But this works fine in busybox v1.22.1 bionic shell
+
+ui_print() {
+  echo "ui_print $1 " > "/proc/$$/fd/$RECOVERY_FD"
+  if ! [ q"$2" = q ]; then
+    echo "ui_print UI_PRINT: extra arg: $2" > "/proc/$$/fd/$RECOVERY_FD"
+  fi
+}
+
+wrap_output() {
+  while read -r line; do
+    ui_print "$line"
+  done
+}
+
+check_free_space() {
+  ui_print "INFO: Checking free space in $storage"
+  storage_free=$(df -P "$storage" | busybox awk '{print $4}' | tail -n 1)
+  if [ $((storage_free/1024)) -lt 0$((emmc_size/1024/1024)) ]; then
+      ui_print "ERROR: not enough space in $storage (have $((storage_free/1024)) Mb, want $((emmc_size/1024/1024)) Mb)"
+      ui_print "Refusing to continue, nothing changed yet"
+      exit "$E_LOWFREESTORAGE"
+  fi
+  ui_print "INFO: $storage have $((storage_free/1024))Mb free)"
+}
+
+give_up() {
+  ui_print " "
+  ui_print " "
+  ui_print " "
+  ui_print " "
+  ui_print " "
+  ui_print "EMERGENCY: Unable to restore original eMMC dump"
+  ui_print "EMERGENCY: Your device is most likely broken now!"
+  ui_print "EMERGENCY: DO NOT REBOOT OR POWER DOWN IT NOW!"
+  ui_print "EMERGENCY: Connect it to PC and try to do something in adb shell manually"
+  ui_print "EMERGENCY: Backups location:"
+  ui_print "EMERGENCY: sgdisk GPT backup: '$GPT_BACKUP'"
+  ui_print "EMERGENCY: full eMMC dd dump (compressed with gzip): '$FULL_DUMP'"
+  ui_print " "
+  ui_print "FATAL: Giving up... Sorry... x_x"
+  exit "$E_FATAL"
+}
+
+revert_full_dump() {
+  ui_print "REVERT: INFO: Trying to restore original eMMC dump"
+  if ! pigz -kd "$FULL_DUMP" | dd of="$EMMC_BLOCK_DEVICE" bs=1M; then
+    give_up
+  else
+    ui_print "REVERT: INFO: Restored original eMMC dump"
+    ui_print "REVERT: INFO: Verifying GPT print"
+    sgdisk --print "$EMMC_BLOCK_DEVICE" 2>&1 | tee "${storage}/${date}_revert_gpt_print.txt"
+    if diff "${storage}/${date}_orig_gpt_print.txt" "${storage}/${date}_revert_gpt_print.txt" ; then
+      ui_print "REVERT: INFO: Successfully restored original eMMC dump"
+      ui_print "REVERT: INFO: Verifying GPT integrity"
+      if sgdisk --verify "$EMMC_BLOCK_DEVICE" | grep -q 'No problems found'; then
+        ui_print "REVERT: INFO: GPT is now correct again"
+        exit "$E_REVERTED"
+      else
+        ui_print "REVERT: WARNING: Full eMMC dump was restored, but GPT still broken!"
+        exit "$E_GPTSTILLBROKEN"
+      fi
+    else 
+      ui_print "REVERT: WARNING: GPT backup restoring failed - original and current GPT print still mismatch!"
+      give_up
+    fi
+  fi
+}
+
+revert() {
+  ui_print "REVERT: INFO: Trying to restore original GPT backup"
+  if ! sgdisk --load-backup="$1" "$EMMC_BLOCK_DEVICE"; then
+    ui_print "REVERT: WARNING: sgdisk failed while restoring GPT!"
+    revert_full_dump "$FULL_DUMP"
+  else
+    ui_print "REVERT: INFO: Restored original GPT backup"
+    ui_print "REVERT: INFO: Printing restored GPT to '${storage}/${date}_revert_gpt_print.txt'"
+    sgdisk --print "$EMMC_BLOCK_DEVICE" 2>&1 | tee "${storage}/${date}_revert_gpt_print.txt"
+    if diff "${storage}/${date}_orig_gpt_print.txt" "${storage}/${date}_revert_gpt_print.txt" ; then
+      ui_print "REVERT: INFO: Successfully restored original GPT backup"
+      ui_print "REVERT: INFO: Verifying restored GPT integrity"
+      if sgdisk --verify "$EMMC_BLOCK_DEVICE" | grep -q 'No problems found'; then
+        ui_print "REVERT: INFO: Restored GPT is correct"
+        exit "$E_REVERTED"
+      fi
+      ui_print "REVERT: WARNING: GPT backup restoring failed - GPT still broken!"
+      revert_full_dump "$FULL_DUMP"
+    else 
+      ui_print "REVERT: WARNING: GPT backup restoring failed - original and current GPT print still mismatch!"
+      revert_full_dump "$FULL_DUMP"
+    fi
+  fi
+}
+
+get_mounted_partitions() {
+  mounted_partitions="$(mount | grep -E "mmcblk0|msm_sdcc.1" | awk '{print $3}')"
+}
+
+read_partition() {
+  partition="$1"
+  ui_print "INFO: Reading $partition from $EMMC_PARTITIONS_PATH/$partition to /tmp/$partition.img"
+  if ! dd if="$EMMC_PARTITIONS_PATH/$partition" of="/tmp/$partition.img"; then
+    ui_print "ERROR: Cannot read $partition!"
+    ui_print "Refusing to continue, nothing changed yet"
+    exit "$E_PARTITIONREADFAIL"
+  fi
+  ui_print "INFO: $partition readed successfully"
+}
+
+write_partition() {
+  partition="$1"
+  ui_print "INFO: Writing $partition from /tmp/$partition.img to $EMMC_PARTITIONS_PATH/$partition"
+  if ! dd if="/tmp/$partition.img" of="$EMMC_PARTITIONS_PATH/$partition"; then
+    ui_print "ERROR: Cannot write recovery back to eMMC!"
+    revert_full_dump "$FULL_DUMP"
+  fi
+  ui_print "INFO: $partition written successfully"
+}
+
+ui_print "INFO: Verifying recovery version"
+ro_bootimage_build_date_utc="$(getprop ro.bootimage.build.date.utc)"
+if [ q"$ro_bootimage_build_date_utc" = q ] ; then
+  ui_print "ERROR: Legacy recovery detected"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_BADRECOVERY"
+fi
+case "$ro_bootimage_build_date_utc" in 
+"$RECOVERY_BUILD_DATE_2870M_TEST1") ui_print "INFO: TWRP 2.8.7.0M test1 recovery detected" ;;
+"$RECOVERY_BUILD_DATE_3020")        ui_print "INFO: TWRP 3.0.2.0 recovery detected" ;;
+*) ui_print "WARNING: unknown recovery detected (ro.bootimage.build.date.utc=$ro_bootimage_build_date_utc)" ;;
+esac
+
+if mount | grep /external_sd; then 
+  ui_print "INFO: /external_sd already mounted"
+else
+  ui_print "INFO: mounting /external_sd"
+  if mount /external_sd; then
+    ui_print "INFO: /external_sd mounted"
+  else
+    ui_print "INFO: unable to mount /external_sd"
+  fi
+fi
+
+if mount | grep /usb-otg; then 
+  ui_print "INFO: /usb-otg already mounted"
+else
+  ui_print "INFO: mounting /usb-otg"
+  if mount /usb-otg; then
+    ui_print "INFO: /usb-otg mounted"
+  else
+    ui_print "INFO: unable to mount /usb-otg"
+  fi
+fi
+
+ui_print "INFO: Verifying eMMC size"
+emmc_size="$(blockdev --getsize64 "$EMMC_BLOCK_DEVICE")"
+if [ q"$EMMC_SIZE" != q"$emmc_size" ]; then
+  ui_print "ERROR: eMMC size mismatch! emmc_size=$emmc_size bytes ($(blockdev --getsize "$EMMC_BLOCK_DEVICE") sectors)"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_EMMCSIZEMISMATCH"
+fi
+ui_print "INFO: eMMC size matched"
+
+ui_print "INFO: Checking if IBL is installed"
+if ! grep -q "S-trace@list.ru" "$EMMC_PARTITIONS_PATH/aboot"; then
+  ui_print "ERROR: IBL is not installed!"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_NOIBL"
+fi
+ui_print "INFO: IBL is installed"
+
+ui_print "INFO: Determining storage to use"
+df="$(busybox df -P /external_sd /usb-otg | busybox tail -n +2)"
+storage_max_free=$(echo "$df" | busybox awk '{print $4}' | sort -n | tail -n 1)
+storage=$(echo "$df" | grep "$storage_max_free" | busybox awk '{print $6}')
+if [ q"$storage" = q ]; then
+  ui_print "ERROR: Unable to select storage to use"
+  ui_print "(Is SD card or USB drive connected?)"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_NOSTORAGE"
+fi
+ui_print "INFO: Will use $storage ($((storage_max_free/1024))Mb free)"
+
+ui_print "INFO: Checking $storage FS type"
+eval "$(blkid "$(mount | grep "$storage" | cut -d ' ' -f 1)" | tr ' ' '\n' | grep TYPE)"
+if [ "q$TYPE" != "qexfat" ] && [ "q$TYPE" != "qntfs" ]; then
+  ui_print "ERROR: unsupported FS on $storage: have $TYPE, want exfat or NTFS"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_BADSTORAGEFS"
+fi
+ui_print "INFO: Found $TYPE FS on $storage"
+
+check_free_space
+
+ui_print "INFO: Checking battery level"
+battery="$(cat /sys/class/power_supply/bms/capacity)"
+if [ 90 -gt 0"$battery" ]; then
+  ui_print "ERROR: Low battery (${battery}%)! Please charge it to 90% or more and try again"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_LOWBATTERY"
+fi
+ui_print "INFO: Battery level: ${battery}%"
+
+date="$(date | tr ' :' '-.')"
+
+FULL_DUMP="${storage}/${date}_full_emmc_image.bin.gz"
+GPT_BACKUP="${storage}/${date}_orig_gpt_backup.bin"
+
+ui_print "INFO: Backing up current GPT to '$GPT_BACKUP'"
+if ! sgdisk --backup="$GPT_BACKUP" "$EMMC_BLOCK_DEVICE"; then
+  ui_print "ERROR: sgdisk failed while backing up GPT"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_GPTBACKUPFAIL"
+fi
+
+ui_print "INFO: Verifying current GPT integrity"
+if ! sgdisk --verify "$EMMC_BLOCK_DEVICE" | grep -q 'No problems found'; then
+  ui_print "ERROR: Current GPT already was broken!"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_GPTWASBROKEN"
+fi
+ui_print "INFO: Current GPT is correct"
+
+ui_print "INFO: Verifying constant GPT part"
+gpt_const_part_md5="$(sgdisk --print "$EMMC_BLOCK_DEVICE" 2>&1 | tee "${storage}/${date}_orig_gpt_print.txt" | grep -F "Start (sector)" -A 15 | md5sum | cut -d ' ' -f 1)"
+if [ q"$gpt_const_part_md5" != q"$GPT_CONST_PART_MD5" ]; then
+  ui_print "ERROR: GPT constant part mismatch! const_part_md5=$gpt_const_part_md5"
+  ui_print "GPT layout printed to ${storage}/${date}_orig_gpt_print.txt - please report this to S-trace <S-trace@list.ru>"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_CONSTGPTMISMATCH"
+fi
+ui_print "INFO: GPT constant part matched"
+
+ui_print "INFO: Checking for mounted eMMC partitions"
+get_mounted_partitions
+if [ q"$mounted_partitions" = q ]; then
+  ui_print "INFO: No eMMC partitions mounted"
+else
+  ui_print "INFO: eMMC partitions mounted: '$(echo "$mounted_partitions" | tr '\n' ' ')'"
+  for mountpoint in $mounted_partitions; do 
+    ui_print "INFO: umounting '$mountpoint'"
+    if ! umount "$mountpoint"; then
+      ui_print "ERROR: unable to umount '$mountpoint'"
+      ui_print "Refusing to continue, nothing changed yet"
+      exit "$E_UMOUNTFAIL"
+    fi
+  done
+  ui_print "INFO: Checking for mounted eMMC partitions again"
+  get_mounted_partitions
+  if [ q"$mounted_partitions" = q ]; then
+    ui_print "INFO: No eMMC partitions mounted"
+  else 
+    ui_print "ERROR: unable to umount '$mounted_partitions'"
+    ui_print "Refusing to continue, nothing changed yet"
+    exit "$E_UMOUNTFAIL"
+  fi
+fi
+ui_print "INFO: All eMMC partitions was umounted"
+sync
+
+ui_print "INFO: Checking if eMMC still busy"
+if ! blockdev --rereadpt "$EMMC_BLOCK_DEVICE"; then
+  ui_print "ERROR: eMMC still busy"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_EMMCSTILLBUSY"
+fi
+sleep 5
+ui_print "INFO: eMMC is not busy now"
+
+read_partition recovery
+read_partition DDR
+read_partition ssd
+
+ui_print "INFO: Dumping gzipped full eMMC image to '$FULL_DUMP'"
+if ! dd if="$EMMC_BLOCK_DEVICE" bs=1M | pigz -5 > "$FULL_DUMP"; then
+  ui_print "ERROR: Full eMMC backup failed!"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_EMMCBACKUPFAILED"
+fi
+ui_print "INFO: full eMMC image dumped"
+
+ui_print "INFO: Extracting new partition table and fstab generator"
+if ! unzip "$ZIP" -o new.gpt new.gpt.md5sum fstab -d /tmp/; then
+  ui_print "ERROR: Unable to extract new.gpt and new.gpt.md5sum from '$ZIP'"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_GPTEXTRACTFAIL"
+fi
+ui_print "INFO: Extracted new.gpt and new.gpt.md5sum"
+
+ui_print "INFO: Checking new.gpt MD5"
+if ! (cd /tmp; md5sum -c /tmp/new.gpt.md5sum); then
+  ui_print "ERROR: new.gpt MD5 check failed"
+  ui_print "Refusing to continue, nothing changed yet"
+  exit "$E_GPTCHECKFAIL"
+fi
+ui_print "INFO: new.gpt MD5 matched"
+
+timer=30
+ui_print " "
+ui_print " "
+ui_print " "
+ui_print "INFO: Pre-checks completed, are you still sure?"
+ui_print "INFO: Power down device immediatly if not!"
+ui_print "INFO: Last chance, you have $timer seconds."
+ui_print " "
+while [ $timer -gt 0 ]; do
+  sleep 5
+  timer=$((timer-5))
+  ui_print "INFO: $timer seconds left."
+  echo 200 > /sys/class/timed_output/vibrator/enable
+done
+ui_print "INFO: Time over, device is still up and running."
+ui_print " "
+ui_print "INFO: LET'S ROCK!"
+
+
+if ! sgdisk_output=$(sgdisk --load-backup=/tmp/new.gpt --randomize-guids "$EMMC_BLOCK_DEVICE" 2>&1) ; then
+  ui_print "ERROR: GPT writing failed!"
+  ui_print "sgdisk output: "
+  echo "$sgdisk_output" | wrap_output
+  revert "$GPT_BACKUP"
+else
+  if echo "$sgdisk_output" | grep -iq Warning; then
+    ui_print "ERROR: GPT written, but sgdisk warning was printed!"
+    ui_print "sgdisk output: "
+    echo "$sgdisk_output" | wrap_output
+    revert "$GPT_BACKUP"
+  fi
+  ui_print "INFO: New GPT written successfully"
+fi
+
+ui_print "INFO: Verifying new GPT integrity"
+if ! sgdisk --verify "$EMMC_BLOCK_DEVICE" | grep -q 'No problems found'; then
+  ui_print "ERROR: New GPT is broken!"
+  revert "$GPT_BACKUP"
+fi
+ui_print "INFO: New GPT is correct"
+
+
+ui_print "INFO: Verifying new GPT constant part"
+gpt_const_part_md5="$(sgdisk --print "$EMMC_BLOCK_DEVICE" 2>&1 | tee "${storage}/${date}_orig_gpt_print.txt" | grep -F "Start (sector)" -A 15 | md5sum | cut -d ' ' -f 1)"
+if [ q"$gpt_const_part_md5" != q"$GPT_CONST_PART_MD5" ]; then
+  ui_print "ERROR: New GPT constant part mismatch! const_part_md5=$gpt_const_part_md5"
+  ui_print "GPT layout printed to '${storage}/${date}_revert_gpt_print.txt' - please report this to S-trace <S-trace@list.ru>"
+  revert "$GPT_BACKUP"
+fi
+ui_print "INFO: New GPT constant part matched"
+
+ui_print " "
+ui_print "INFO: Updating /dev/block/ symlinks"
+rm -rf /dev/block/
+rm /dev/.coldboot_done
+stop ueventd
+start ueventd
+ui_print "INFO: Waiting for ueventd coldboot"
+until [ -f /dev/.coldboot_done ]; do sleep 1; done
+ui_print "INFO: Waiting for ueventd coldboot done"
+
+write_partition recovery
+write_partition DDR
+write_partition ssd
+
+ui_print " "
+ui_print "INFO: Regenerating recovery fstab"
+/tmp/fstab /fstab.recovery.d10f recovery generate
+/tmp/fstab /fstab.recovery.d10f recovery update
+
+ui_print " "
+ui_print "INFO: Regenerating TWRP fstab"
+/tmp/fstab /etc/recovery.fstab twrp generate
+/tmp/fstab /etc/recovery.fstab twrp update
+
+timer=30
+ui_print " "
+ui_print "INFO: Repartitioning done!"
+ui_print "INFO: Recovery will be restarted in $timer seconds"
+ui_print "INFO: Please do 'Wipe/Advanced Wipe/Data/Repair or Change File System/Change File System/F2FS' and wipe Internal SD after restart"
+while [ $timer -gt 0 ]; do
+  sleep 5
+  timer=$((timer-5))
+  ui_print "INFO: $timer seconds left."
+  echo 200 > /sys/class/timed_output/vibrator/enable
+done
+killall recovery
