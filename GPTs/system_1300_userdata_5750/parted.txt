@@ -1,0 +1,32 @@
+Модель:  (file)
+Диск /tmp/test/eMMC.img: 15269888s
+Размер сектора (логич./физич.): 512B/512B
+Таблица разделов: gpt
+Флаги диска:
+
+Номер  Начало    Конец      Размер     Файловая система  Имя       Флаги
+ 1     131072s   134143s    3072s                        fsg
+ 2     262144s   263167s    1024s                        sbl1
+ 3     263168s   264191s    1024s                        sbl1bak   msftdata
+ 4     264192s   264255s    64s                          sdi
+ 5     264256s   266303s    2048s                        aboot
+ 6     266304s   268351s    2048s                        abootbak  msftdata
+ 7     268352s   269351s    1000s                        rpm
+ 8     269352s   270351s    1000s                        rpmbak    msftdata
+ 9     270352s   271351s    1000s                        tz
+10     271352s   272351s    1000s                        tzbak     msftdata
+11     272352s   274399s    2048s                        pad       msftdata
+12     274400s   277471s    3072s                        modemst1
+13     277472s   280543s    3072s                        modemst2
+14     280544s   282591s    2048s                        misc
+15     282592s   282593s    2s                           fsc
+17     282624s   282639s    16s                          ssd
+18     284672s   305151s    20480s                       splash
+19     305152s   436223s    131072s                      modem     msftdata
+20     436224s   436287s    64s                          DDR
+21     438272s   471039s    32768s                       boot
+22     471040s   536575s    65536s                       persist   msftdata
+23     536576s   798719s    262144s                      cache     msftdata
+24     798720s   831487s    32768s                       recovery
+25     831488s   3493887s   2662400s                     system    msftdata
+16     3493888s  15269854s  11775967s                    userdata  msftdata
